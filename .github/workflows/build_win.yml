@@ -1,0 +1,188 @@
+name: Build Windows with Installer
+
+on:
+  push:
+    branches:
+     - main
+    paths:
+     - 'deps/**'
+     - 'src/**'
+     - '**/CMakeLists.txt'
+     - 'version.inc'
+     - 'bbl/**'
+     - 'resources/**'
+     - ".github/workflows/build_win.yml"
+
+  pull_request:
+    branches:
+     - master
+    paths:
+     - 'deps/**'
+     - 'src/**'
+     - '**/CMakeLists.txt'
+     - 'version.inc'
+     - ".github/workflows/build_win.yml"
+     - 'build_win.bat'
+    
+  workflow_dispatch: # manual dispatch
+      inputs:
+        build-deps-only:
+            description: 'Only build dependencies (bypasses caching)'
+            type: boolean
+            default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_deps:
+    name: Build Dependencies
+    runs-on: windows-latest
+    outputs:
+      cache-key: ${{ steps.set-cache-key.outputs.cache-key }}
+      cache-path: ${{ steps.set-cache-key.outputs.cache-path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: 'true'
+
+      - name: Set cache key
+        id: set-cache-key
+        run: |
+          $os = "windows-latest"
+          $arch = "x64"
+          $date = Get-Date -Format 'yyyyMMdd'
+          $sha = "${{ github.sha }}"
+          $shortSha = $sha.Substring(0, 7)
+          $cache_key = "BambuStudio_dep_$os" + "_$arch" + "_$date" + "_$shortSha"
+          $cache_path = "deps/build"
+          echo "cache-key=$cache_key" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          echo "cache-path=$cache_path" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+        shell: pwsh
+
+      - name: Load cached dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.set-cache-key.outputs.cache-path }}
+          key: ${{ steps.set-cache-key.outputs.cache-key }}
+
+      - name: Install dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true' || inputs.build-deps-only
+        run: |
+          choco install nsis
+          choco install cmake
+          choco install ninja
+          choco install git
+
+      - name: Build dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true' || inputs.build-deps-only
+        run: |
+          ./build_win.bat -d
+
+  build_bambu:
+    name: Build BambuStudio
+    runs-on: windows-latest
+    needs: build_deps
+    env:
+      date:
+      ver:
+      ver_pure:
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: 'true'
+
+      - name: Load cached dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ needs.build_deps.outputs.cache-path }}
+          key: ${{ needs.build_deps.outputs.cache-key }}
+          fail-on-cache-miss: true
+
+      - name: Get version and date
+        run: |
+          $date = Get-Date -Format 'yyyyMMdd'
+          $ref = "${{ github.ref }}"
+          $eventName = "${{ github.event_name }}"
+          $prNumber = "${{ github.event.number }}"
+
+          if ($eventName -eq 'pull_request') {
+              $ver = "PR-$prNumber"
+          } else {
+              $versionContent = Get-Content version.inc -Raw
+              if ($versionContent -match 'set\(SLIC3R_VERSION "(.*?)"\)') {
+                  $ver_pure = $matches[1]
+              }
+              $ver = "V$ver_pure"
+          }
+
+          echo "ver=$ver" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          echo "ver_pure=$ver_pure" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          echo "date=$date" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          echo "Version: $ver, Date: $date"
+        shell: pwsh
+
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install NSIS and pkgconfig
+        run: |
+          dir "C:/Program Files (x86)/Windows Kits/10/Include"
+          choco install nsis
+          choco install pkgconfiglite
+
+      - name: Build BambuStudio
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          cmake --build . --target install --config Release -- -m
+
+      - name: Create installer
+        working-directory: ${{ github.workspace }}/build
+        run: |
+          echo "Creating NSIS installer..."
+          cpack -G NSIS
+          if (Test-Path "*.exe") {
+              Get-ChildItem -Path "." -Filter "*.exe" | ForEach-Object {
+                  $newName = "BambuStudio_Windows_${{ env.ver }}_installer.exe"
+                  Rename-Item -Path $_.FullName -NewName $newName
+                  echo "Renamed installer to: $newName"
+              }
+          } else {
+              echo "No .exe file found after cpack"
+              exit 1
+          }
+
+      - name: Create portable zip
+        working-directory: ${{ github.workspace }}
+        shell: cmd
+        run: |
+          echo "Creating portable zip..."
+          "C:/Program Files/7-Zip/7z.exe" a -tzip BambuStudio_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/install-dir
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BambuStudio_Windows_${{ env.ver }}_installer
+          path: ${{ github.workspace }}/build/BambuStudio_Windows_${{ env.ver }}_installer.exe
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BambuStudio_Windows_${{ env.ver }}_portable
+          path: ${{ github.workspace }}/BambuStudio_Windows_${{ env.ver }}_portable.zip
+
+      - name: List build artifacts
+        run: |
+          echo "=== Build directory contents ==="
+          Get-ChildItem -Path ${{ github.workspace }}/build -Recurse -File | Where-Object { $_.Extension -eq ".exe" } | Format-Table Name, Length, Directory
+          echo "=== Root directory .zip files ==="
+          Get-ChildItem -Path ${{ github.workspace }} -Filter "*.zip" | Format-Table Name, Length
+        shell: pwsh 
