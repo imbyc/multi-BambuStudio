@@ -69,18 +69,25 @@ jobs:
           path: ${{ steps.set-cache-key.outputs.cache-path }}
           key: ${{ steps.set-cache-key.outputs.cache-key }}
 
+      - name: Setup MSVC
+        if: steps.cache-deps.outputs.cache-hit != 'true' || inputs.build-deps-only
+        uses: microsoft/setup-msbuild@v2
+
       - name: Install dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true' || inputs.build-deps-only
         run: |
-          choco install nsis
-          choco install cmake
-          choco install ninja
-          choco install git
+          choco install strawberryperl
+          choco install pkgconfiglite
 
       - name: Build dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true' || inputs.build-deps-only
+        working-directory: ${{ github.workspace }}
         run: |
-          ./build_win.bat -d "deps\build\BambuStudio_dep" -s deps
+          mkdir ${{ github.workspace }}\deps\build
+          mkdir ${{ github.workspace }}\deps\build\BambuStudio_dep
+          cd "${{ github.workspace }}\deps\build"
+          cmake ../ -G "Visual Studio 17 2022" -A x64 -DDESTDIR="./BambuStudio_dep" -DCMAKE_BUILD_TYPE=Release -DDEP_DEBUG=OFF
+          msbuild /m ALL_BUILD.vcxproj
 
   build_bambu:
     name: Build BambuStudio
