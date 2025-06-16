@@ -80,7 +80,7 @@ jobs:
       - name: Build dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true' || inputs.build-deps-only
         run: |
-          ./build_win.bat -d
+          ./build_win.bat -d "deps\build\BambuStudio_dep" -s deps
 
   build_bambu:
     name: Build BambuStudio
