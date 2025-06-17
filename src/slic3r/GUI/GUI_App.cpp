@@ -5099,6 +5099,14 @@ void GUI_App::on_user_login(wxCommandEvent &evt)
 {
     if (!m_agent) { return; }
     int online_login = evt.GetInt();
+    
+    // BBS: Switch to user-specific data directory after login
+    std::string user_id = m_agent->get_user_id();
+    if (!user_id.empty()) {
+        switch_to_user_data_dir(user_id);
+        BOOST_LOG_TRIVIAL(info) << "Switched to user data directory for user: " << user_id;
+    }
+    
     // check privacy before handle
     check_privacy_version(online_login);
     check_track_enable();
