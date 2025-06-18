@@ -217,6 +217,7 @@ void PrintJob::process()
     params.password = m_access_code;
 
     // check access code and ip address
+    /*
     if (this->connection_type == "lan" && m_print_type == "from_normal") {
         params.dev_id = m_dev_id;
         params.project_name = "verify_job";
@@ -234,6 +235,7 @@ void PrintJob::process()
         params.project_name = "";
         params.filename = "";
     }
+    */
 
     params.dev_id               = m_dev_id;
     params.ftp_folder           = m_ftp_folder;
