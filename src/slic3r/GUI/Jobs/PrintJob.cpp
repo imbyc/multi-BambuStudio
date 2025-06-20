@@ -604,7 +604,7 @@ void PrintJob::process()
         }
     }
 
-    if (result < 0) {
+    if (result < 0 && result != BAMBU_NETWORK_SIGNED_ERROR) {
         curr_percent = -1;
         if (result == BAMBU_NETOWRK_ERR_PRINT_SP_ENC_FLAG_NOT_READY) {
             msg_text = _L("Retrieving printer information, please try again later.");
@@ -622,14 +622,12 @@ void PrintJob::process()
         } else if (result == BAMBU_NETWORK_ERR_CANCELED) {
             msg_text = PRINT_CANCELED_STR;
             this->update_status(0, msg_text);
-        } else if (result == BAMBU_NETWORK_SIGNED_ERROR) {
-            msg_text = PRINT_SIGNED_STR;
         } else {
             msg_text = SEND_PRINT_FAILED_STR;
         }
 
         if (result != BAMBU_NETWORK_ERR_CANCELED) {
-            this->show_error_info(msg_text, 0, "", "");
+            this->show_error_info(msg_text, result, "", "");
         }
 
         BOOST_LOG_TRIVIAL(error) << "print_job: failed, result = " << result;
